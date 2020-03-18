@@ -16,6 +16,14 @@ import (
 	"gopkg.in/tomb.v2"
 )
 
+type Time struct {
+	time.Time
+}
+
+func (t Time) MarshalJSON() (bs []byte, err error) {
+	return []byte(`"` + t.UTC().Format(time.RFC3339Nano) + `"`), nil
+}
+
 type Target struct {
 	Name   string `json:"name"`
 	Detail string `json:"detail"`
@@ -62,18 +70,18 @@ func (t *Target) Equal(o *Target) bool {
 }
 
 type FocusRecord struct {
-	Start    time.Time `json:"start"`
-	Stop     time.Time `json:"stop"`
-	Duration float64   `json:"duration"`
+	Start    Time    `json:"start"`
+	Stop     Time    `json:"stop"`
+	Duration float64 `json:"duration"`
 
 	Target
 }
 
 type FocusTracker struct {
-	p Persistence `json:"-"`
+	p Persistence
 
-	Start  time.Time `json:"start"`
-	Target *Target   `json:"target"`
+	Start  Time    `json:"start"`
+	Target *Target `json:"target"`
 }
 
 func NewFocusTracker(p Persistence) (ft *FocusTracker, err error) {
@@ -95,12 +103,12 @@ func (f *FocusTracker) Update(ctx context.Context, node *sway.Node) (err error) 
 			return
 		}
 
-		d := now.Sub(f.Start)
+		d := now.Sub(f.Start.Time)
 
 		err = f.p.Save(ctx, &FocusRecord{
 			Target:   *f.Target,
 			Start:    f.Start,
-			Stop:     now,
+			Stop:     Time{now},
 			Duration: d.Seconds(),
 		})
 		if err != nil {
@@ -111,7 +119,7 @@ func (f *FocusTracker) Update(ctx context.Context, node *sway.Node) (err error) 
 	}
 
 	f.Target = target
-	f.Start = now
+	f.Start = Time{now}
 
 	if f.Target != nil {
 		fmt.Fprintf(os.Stderr, "Focusing on Name %q Detail %q\n", f.Target.Name, f.Target.Detail)
@@ -253,6 +261,8 @@ func main() {
 
 		fmt.Fprintf(os.Stderr, "User requested exit %s\n", s)
 
+		// This is necessary to force a save of the current focus to
+		// the persistence layer.
 		err = ft.Update(ctx, nil)
 		if err != nil {
 			return
