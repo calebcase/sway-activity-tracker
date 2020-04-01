@@ -38,6 +38,10 @@ func NewTarget(node *sway.Node) (target *Target) {
 		return nil
 	}
 
+	if !node.Focused {
+		return nil
+	}
+
 	target = &Target{}
 
 	if node.WindowProperties != nil {
