@@ -1,0 +1,4 @@
+#!/bin/bash
+set -euo pipefail
+
+sway-activity-tracker >> ~/.sway-activity-tracker.log 2>> ~/sway-activity-tracker.err.log

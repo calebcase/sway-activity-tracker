@@ -1,0 +1,66 @@
+#!/bin/bash
+set -euo pipefail
+
+# Usage: activity-tracker-sum [date] [amount] [unit]
+#
+# Examples
+#
+# $ ./activity-tracker-sum yesterday
+# $ ./activity-tracker-sum 3/30/2020 5 days
+
+SWAY_ACTIVITY_TRACKER_LOG=${SWAY_ACTIVITY_TRACKER_LOG:-~/.sway-activity-tracker.log}
+
+day=${1:-today}
+amount=${2:-1}
+unit=${3:-day}
+
+start=$(date -u -d "$(date -d "$day" '+%F %Z')" +%FT%T.%NZ)
+stop=$(date -u -d "$(date -d "$day + $amount $unit" '+%F %Z')" +%FT%T.%NZ)
+
+window=$(jq -c "select(.start > \"$start\" and .stop < \"$stop\")" "$SWAY_ACTIVITY_TRACKER_LOG")
+
+if ((${#window} == 0)); then
+  total_seconds=0
+else
+  total_seconds=$(jq -r '.duration' <<<"$window" | datamash sum 1)
+fi
+
+first=$(head -n 1 <<<"$window" | jq -r '.start')
+last=$(tail -n 1 <<<"$window" | jq -r '.stop')
+
+if ((amount == 1)) && [[ "$unit" == 'day' ]]; then
+  workday=$(bc -l <<<"($(date -d "$last" +%s) - $(date -d "$first" +%s)) / 60 / 60")
+
+  printf "%s %s to %s %.1fh\n\n" "$(date --iso -d "$start")" "$(date -d "$first" '+%I:%M %p')" "$(date -d "$last" '+%I:%M %p')" "$workday"
+else
+  printf "%s until %s\n%s to %s\n\n" "$(date --iso -d "$start")" "$(date --iso -d "$stop")" "$(date -d "$first" '+%F %I:%M %p')" "$(date -d "$last" '+%F %I:%M %p')"
+fi
+
+(
+  printf "%.1fh total\n" "$(bc -l <<<"$total_seconds / 60 / 60")"
+
+  names=$(jq -r '.name' <<<"$window" | sort | uniq)
+  for name in $names; do
+    seconds=$(jq "select(.name == \"$name\")" <<<"$window" | jq -r '.duration' | datamash sum 1)
+
+    if [[ "$name" == 'firefox' ]]; then
+      # slack
+      s=$(jq "select(.name == \"$name\") | select(.detail | test(\"^Slack [|]\"))" <<<"$window" | jq -r '.duration' | datamash sum 1)
+      if [[ ! -z "$s" ]] && (($(bc -l <<<"$s > 0") == 1)); then
+        printf '%.1fh firefox [slack]\n' "$(bc -l <<<"$s / 60 / 60")"
+        seconds=$(bc -l <<<"$seconds - $s")
+      fi
+
+      # meet
+      s=$(jq "select(.name == \"$name\") | select(.detail | test(\"^Meet -\"))" <<<"$window" | jq -r '.duration' | datamash sum 1)
+      if [[ ! -z "$s" ]] && (($(bc -l <<<"$s > 0") == 1)); then
+        printf '%.1fh firefox [meet]\n' "$(bc -l <<<"$s / 60 / 60")"
+        seconds=$(bc -l <<<"$seconds - $s")
+      fi
+    fi
+
+    printf '%.1fh %s\n' "$(bc -l <<<"$seconds / 60 / 60")" "$name"
+  done
+) | column -t | sort -r -V
+
+printf '\n'
